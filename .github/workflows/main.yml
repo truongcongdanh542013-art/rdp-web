@@ -1,0 +1,171 @@
+name: 🚀 LongVPS 
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: '🕐 Thời gian sử dụng'
+        required: false
+        default: '5h40m'
+        type: choice
+        options:
+        - '1h'
+        - '3h' 
+        - '5h40m'
+
+jobs:
+  Premium-RDP-Setup:
+    runs-on: windows-latest
+    timeout-minutes: 340
+    
+    steps:
+      # BANNER CHÀO MỪNG
+      - name: 🎯 KHỞI ĐỘNG HỆ THỐNG
+        run: |
+          Write-Host ""
+          Write-Host ""
+          Write-Host "🤖 Longday SERVER" -ForegroundColor Yellow
+          Write-Host "⚡ Powered by AIL" -ForegroundColor Green
+          Write-Host "🕒 Thời gian: ${{ github.event.inputs.duration }}" -ForegroundColor Magenta
+          Write-Host ""
+          
+          $frames = @('⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷')
+          for($i=0; $i -lt 10; $i++){
+            Write-Host "`r🚀 Đang khởi tạo hệ thống... $($frames[$i % 8])" -NoNewline -ForegroundColor Blue
+            Start-Sleep -Milliseconds 100
+          }
+          Write-Host "`r✅ Hệ thống đã sẵn sàng!" -ForegroundColor Green
+
+      # CẤU HÌNH NÂNG CAO
+      - name: 🔧 CẤU HÌNH HỆ THỐNG
+        run: |
+          Write-Host "🛠️  ĐANG CẤU HÌNH HỆ THỐNG"
+
+          $steps = @(
+            @{Name="Bật Remote Desktop"; Script={ 
+                Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+            }},
+            @{Name="Tắt xác thực mạng"; Script={
+                Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+            }},
+            @{Name="Cấu hình bảo mật RDP"; Script={
+                Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+            }},
+            @{Name="Mở port 3389 firewall"; Script={
+                netsh advfirewall firewall add rule name="RDP-Premium" dir=in action=allow protocol=TCP localport=3389 profile=any
+            }},
+            @{Name="Khởi động dịch vụ"; Script={
+                Set-Service TermService -StartupType Automatic
+                Start-Service TermService
+            }}
+          )
+
+          foreach($step in $steps){
+            Write-Host "│ 📋 $($step.Name)..." -NoNewline
+            try{ & $step.Script; Write-Host "`r│ ✅ $($step.Name)" }
+            catch{ Write-Host "`r│ ⚠️  Lỗi nhẹ (đã bỏ qua)" }
+            Start-Sleep -Milliseconds 300
+          }
+
+      # TẠO USER PREMIUM
+      - name: 👤 TẠO TÀI KHOẢN PREMIUM
+        run: |
+          function New-PremiumPassword {
+            $upper='ABCDEFGHJKLMNPQRSTUVWXYZ'
+            $lower='abcdefghijkmnpqrstuvwxyz'
+            $number='23456789'
+            $all=$upper+$lower+$number
+            $pw=''
+            $pw += $upper[(Get-Random -Min 0 -Max $upper.Length)]
+            $pw += $lower[(Get-Random -Min 0 -Max $lower.Length)]
+            $pw += $number[(Get-Random -Min 0 -Max $number.Length)]
+            for($i=0;$i -lt 5;$i++){
+              $pw += $all[(Get-Random -Min 0 -Max $all.Length)]
+            }
+            return -join ($pw.ToCharArray() | Sort-Object {Get-Random})
+          }
+
+          if($env:CUSTOM_RDP_PASS){ $matKhau=$env:CUSTOM_RDP_PASS }
+          else { $matKhau=New-PremiumPassword }
+
+          $secure = ConvertTo-SecureString $matKhau -AsPlainText -Force
+
+          Remove-LocalUser -Name "LongDay2203" -ErrorAction SilentlyContinue
+
+          New-LocalUser -Name "LongDay2203" -Password $secure -AccountNeverExpires
+          Add-LocalGroupMember -Group Administrators -Member "LongDay2203"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "LongDay2203"
+
+          echo "RDP_PASS=$matKhau" >> $env:GITHUB_ENV
+          echo "$matKhau" > $env:TEMP\rdp_password.txt
+
+      # KIỂM TRA QUYỀN
+      - name: 🔍 KIỂM TRA QUYỀN
+        run: |
+          Write-Host "🔍 Checking user..."
+          Get-LocalUser -Name "LongDay2203"
+          Get-Service TermService
+
+      # BOOST NETWORK
+      - name: 🚀 Boost Network (LongVPS)
+        run: |
+          Write-Host "🚀 BOOST NETWORK..."
+
+          netsh int tcp set global autotuninglevel=normal
+          netsh int tcp set global rss=enabled
+          netsh int tcp set global chimney=enabled
+          netsh int tcp set supplemental template=internet congestionprovider=cubic
+
+          reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v EnableTCPFastOpen /t REG_DWORD /d 1 /f
+          netsh winhttp reset proxy
+          netsh interface ipv4 set subinterface "Ethernet" mtu=1500 store=persistent
+
+          Write-Host "✅ BOOST DONE!"
+
+      # TAILSCALE
+      - name: 🌐 TAILSCALE
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          Write-Host "🌐 Installing..."
+          $msi="$env:TEMP\tailscale.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $msi
+          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /quiet /norestart" -Wait
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey $env:TAILSCALE_AUTH_KEY
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      # ANTI AFK 
+      - name: 🛡️ ANTI-AFK (LongVPS)
+        run: |
+          Write-Host "🛡️ Starting Anti-AFK..."
+          $script=@"
+Add-Type -AssemblyName System.Windows.Forms
+while($true){
+  [System.Windows.Forms.SendKeys]::SendWait('+')
+  Start-Sleep -Seconds 45
+}
+"@
+          $path="$env:TEMP\anti_afk.ps1"
+          $script | Out-File $path
+          Start-Process powershell -ArgumentList "-WindowStyle Hidden -File `"$path`""
+
+      # THÔNG TIN KẾT NỐI
+      - name: 🎉 THÔNG TIN KẾT NỐI
+        run: |
+          $pw = Get-Content $env:TEMP\rdp_password.txt
+          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "User: LongDay2203"
+          Write-Host "Pass: $pw"
+
+      # DUY TRÌ
+      - name: ⏳ DUY TRÌ
+        run: |
+          Start-Sleep -Seconds 99999
+
+      # CLEANUP
+      - name: 🧹 CLEANUP
+        if: always()
+        run: |
+          Disable-LocalUser -Name "LongDay2203"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" down
